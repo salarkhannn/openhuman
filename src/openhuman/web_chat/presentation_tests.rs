@@ -347,6 +347,7 @@ async fn delivery_stores_the_reply_before_announcing_it() {
         "summarise this",
         &[citation],
         Some(ws.as_path()),
+        Some("t-deliver:req-deliver"),
     )
     .await;
 
@@ -364,6 +365,13 @@ async fn delivery_stores_the_reply_before_announcing_it() {
     assert_eq!(
         messages[0].extra_metadata["citations"][0]["id"],
         "mem-deliver"
+    );
+    // Same argument for the trace id: the client's append collapses onto this
+    // row, so a feedback score can only reach the right trace if the id is
+    // already here. This is the whole delivery half of #4496.
+    assert_eq!(
+        messages[0].extra_metadata["traceId"], "t-deliver:req-deliver",
+        "the stored reply must carry the turn's trace id"
     );
 }
 
@@ -384,6 +392,7 @@ async fn delivery_still_announces_when_the_reply_cannot_be_stored() {
         "hi",
         &[],
         Some(ws.as_path()),
+        None,
     )
     .await;
 

@@ -27,6 +27,9 @@ async fn finalize_flow_stream(
                 // stays the only persister of a flow turn's reply — unchanged
                 // from before #6034, which covered the chat surfaces.
                 None,
+                // Nothing persists this reply here, so there is no row to stamp
+                // a trace id onto and no feedback affordance to offer (#4496).
+                None,
             )
             .await;
         }

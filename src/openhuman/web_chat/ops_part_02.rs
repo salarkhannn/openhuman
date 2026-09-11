@@ -389,6 +389,9 @@ pub async fn start_chat(
                     // The workspace the turn ran in, so the reply is stored
                     // there before it is announced (#6034).
                     Some(chat_result.workspace_dir.as_path()),
+                    // The trace that turn exported, stamped onto the same row so
+                    // the renderer can score it (#4496).
+                    chat_result.trace_id.as_deref(),
                 )
                 .await;
             }

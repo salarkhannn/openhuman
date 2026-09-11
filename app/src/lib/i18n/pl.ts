@@ -721,6 +721,8 @@ const messages: TranslationMap = {
   'chat.typeMessage': 'Wyślij wiadomość...',
   'chat.send': 'Wyślij wiadomość',
   'chat.stopGeneration': 'Zatrzymaj generowanie',
+  'chat.feedback.goodResponse': 'Dobra odpowiedź',
+  'chat.feedback.badResponse': 'Zła odpowiedź',
   'chat.stoppedByUser': 'Zatrzymano',
   'chat.parallelBranchHint': 'Wpisz równoległą gałąź: ⌘/Ctrl+Enter, aby wysłać',
   'chat.followupHint':

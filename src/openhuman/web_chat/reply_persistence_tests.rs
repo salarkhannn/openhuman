@@ -30,8 +30,15 @@ fn persists_the_reply_under_the_id_the_client_will_reuse() {
     let ws = temp_ws();
     seed_thread(&ws, "t-1");
 
-    let stored = persist_delivered_reply(&ws, "t-1", "req-1", "Done, the draft is updated.", &[])
-        .expect("append succeeds");
+    let stored = persist_delivered_reply(
+        &ws,
+        "t-1",
+        "req-1",
+        "Done, the draft is updated.",
+        &[],
+        None,
+    )
+    .expect("append succeeds");
     assert!(stored, "a non-empty reply must report that it was stored");
 
     let messages = conversations::get_messages(ws.clone(), "t-1").expect("messages");
@@ -50,12 +57,12 @@ fn a_second_write_of_the_same_turn_does_not_add_a_row() {
     let ws = temp_ws();
     seed_thread(&ws, "t-2");
 
-    persist_delivered_reply(&ws, "t-2", "req-2", "First", &[]).expect("first append");
+    persist_delivered_reply(&ws, "t-2", "req-2", "First", &[], None).expect("first append");
     // The client persists the same reply from the `chat_done` it received. The
     // store's idempotency for deterministic ids is what keeps the thread at one
     // row; assert the second write here so a change to the id shape (which
     // would silently opt out of that lookup) fails loudly.
-    persist_delivered_reply(&ws, "t-2", "req-2", "First", &[]).expect("second append");
+    persist_delivered_reply(&ws, "t-2", "req-2", "First", &[], None).expect("second append");
 
     let messages = conversations::get_messages(ws.clone(), "t-2").expect("messages");
     assert_eq!(messages.len(), 1, "one turn must never leave two rows");
@@ -66,7 +73,8 @@ fn an_empty_reply_is_not_stored() {
     let ws = temp_ws();
     seed_thread(&ws, "t-3");
 
-    let stored = persist_delivered_reply(&ws, "t-3", "req-3", "   \n  ", &[]).expect("no error");
+    let stored =
+        persist_delivered_reply(&ws, "t-3", "req-3", "   \n  ", &[], None).expect("no error");
     assert!(!stored, "an empty reply reports that nothing was stored");
     assert!(conversations::get_messages(ws.clone(), "t-3")
         .expect("messages")
@@ -78,7 +86,7 @@ fn content_is_trimmed_the_way_the_autonomous_path_trims_it() {
     let ws = temp_ws();
     seed_thread(&ws, "t-4");
 
-    persist_delivered_reply(&ws, "t-4", "req-4", "  padded reply\n", &[]).expect("append");
+    persist_delivered_reply(&ws, "t-4", "req-4", "  padded reply\n", &[], None).expect("append");
 
     let messages = conversations::get_messages(ws.clone(), "t-4").expect("messages");
     assert_eq!(messages[0].content, "padded reply");
@@ -88,7 +96,7 @@ fn content_is_trimmed_the_way_the_autonomous_path_trims_it() {
 fn a_missing_thread_is_reported_rather_than_silently_dropped() {
     let ws = temp_ws();
 
-    let err = persist_delivered_reply(&ws, "nope", "req-5", "text", &[])
+    let err = persist_delivered_reply(&ws, "nope", "req-5", "text", &[], None)
         .expect_err("a missing thread must not look like a successful store");
     assert!(err.contains("nope"), "error names the thread: {err}");
 }
@@ -106,7 +114,7 @@ fn citations_ride_on_the_authoritative_row() {
         timestamp: "2026-09-04T00:00:00Z".to_string(),
         snippet: "The draft lives in Notion.".to_string(),
     };
-    persist_delivered_reply(&ws, "t-6", "req-6", "Updated the draft.", &[citation])
+    persist_delivered_reply(&ws, "t-6", "req-6", "Updated the draft.", &[citation], None)
         .expect("append");
 
     // The client's append is deduped onto this row, so whatever is missing here
@@ -125,11 +133,55 @@ fn a_reply_without_citations_stores_no_citations_key() {
     let ws = temp_ws();
     seed_thread(&ws, "t-7");
 
-    persist_delivered_reply(&ws, "t-7", "req-7", "No sources for this one.", &[]).expect("append");
+    persist_delivered_reply(&ws, "t-7", "req-7", "No sources for this one.", &[], None)
+        .expect("append");
 
     let messages = conversations::get_messages(ws.clone(), "t-7").expect("messages");
     assert!(
         messages[0].extra_metadata.get("citations").is_none(),
         "an empty citation list must not add an empty array the client never wrote"
+    );
+}
+
+#[test]
+fn stamps_the_turn_trace_id_so_feedback_can_reach_it() {
+    // The renderer reads `extraMetadata.traceId` off the rated message; this
+    // row is the only place it can come from, because the client's own append
+    // collapses onto it (#4496).
+    let ws = temp_ws();
+    seed_thread(&ws, "t-trace");
+
+    persist_delivered_reply(
+        &ws,
+        "t-trace",
+        "req-trace",
+        "Here you go.",
+        &[],
+        Some("t-trace:req-trace"),
+    )
+    .expect("append");
+
+    let messages = conversations::get_messages(ws.clone(), "t-trace").expect("messages");
+    assert_eq!(messages[0].extra_metadata["traceId"], "t-trace:req-trace");
+    // The pre-existing keys must survive alongside it.
+    assert_eq!(messages[0].extra_metadata["requestId"], "req-trace");
+    assert_eq!(messages[0].extra_metadata["scope"], "web_chat_reply");
+}
+
+#[test]
+fn omits_the_trace_id_entirely_for_an_untraced_turn() {
+    // Absent, not null: the UI gates its feedback buttons on the key being
+    // there, and a null would render a control that submits a score to a trace
+    // that was never created.
+    let ws = temp_ws();
+    seed_thread(&ws, "t-untraced");
+
+    persist_delivered_reply(&ws, "t-untraced", "req-untraced", "Here you go.", &[], None)
+        .expect("append");
+
+    let messages = conversations::get_messages(ws.clone(), "t-untraced").expect("messages");
+    assert!(
+        messages[0].extra_metadata.get("traceId").is_none(),
+        "an untraced turn must not carry a traceId key at all"
     );
 }

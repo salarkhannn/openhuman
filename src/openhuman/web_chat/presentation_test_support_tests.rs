@@ -28,6 +28,7 @@ pub async fn deliver_response_for_test(
         user_message,
         citations,
         None,
+        None,
     )
     .await;
 }
@@ -42,6 +43,7 @@ pub async fn deliver_response_in_workspace_for_test(
     user_message: &str,
     citations: &[MemoryCitation],
     workspace_dir: Option<&std::path::Path>,
+    trace_id: Option<&str>,
 ) {
     super::deliver_response(
         client_id,
@@ -52,6 +54,7 @@ pub async fn deliver_response_in_workspace_for_test(
         citations,
         None,
         workspace_dir,
+        trace_id,
     )
     .await;
 }

@@ -658,6 +658,8 @@ const messages: TranslationMap = {
   'chat.typeMessage': '发送消息...',
   'chat.send': '发送',
   'chat.stopGeneration': '停止生成',
+  'chat.feedback.goodResponse': '回答很好',
+  'chat.feedback.badResponse': '回答不好',
   'chat.stoppedByUser': '已停止',
   'chat.parallelBranchHint': '输入并行分支：⌘/Ctrl+Enter 发送',
   'chat.followupHint': '将后续消息加入队列：将在本次回复后发送 · ⌘/Ctrl+Enter 开启并行分支',

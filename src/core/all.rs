@@ -1031,6 +1031,15 @@ fn build_internal_only_controllers() -> Vec<GroupedController> {
         DomainGroup::Modules,
         crate::openhuman::modules::all_registered_controllers(),
     );
+    // Feedback scores on an agent turn's Langfuse trace (#4496). Internal-only
+    // on purpose: the renderer submits the user's thumbs, but an agent that
+    // could call this would be scoring its own output, which is precisely the
+    // signal the metric is meant to provide from outside.
+    push(
+        &mut controllers,
+        DomainGroup::Agent,
+        crate::openhuman::agent::progress_tracing::rpc::all_internal_controllers(),
+    );
     controllers
 }
 
@@ -1120,6 +1129,9 @@ pub fn namespace_description(namespace: &str) -> Option<&'static str> {
         "skills" => Some("Discovered SKILL.md skills (discovery, parse, install, run) and their resources."),
         "socket" => Some("Backend Socket.IO bridge controls."),
         "memory" => Some("Document storage, vector search, key-value store, and knowledge graph."),
+        "observability" => Some(
+            "Attach feedback and quality scores to the traces agent turns export.",
+        ),
         "memory_goals" => Some(
             "The agent's long-term goals list for working with the user — editable items plus turn-based enrichment.",
         ),

@@ -138,6 +138,16 @@ Capability {
         privacy: None,
     },
     Capability {
+        id: "conversation.response_feedback",
+        name: "Rate a Response",
+        domain: "conversation",
+        category: CapabilityCategory::Conversation,
+        description: "Rate an assistant reply with thumbs up or down. The rating is attached to that turn's own trace, so a run can be reviewed alongside the tool calls and model calls that produced it. Only turns that exported a trace can be rated, and nothing is sent when usage-data sharing is off.",
+        how_to: "Conversations > thumbs up / thumbs down beneath an assistant reply",
+        status: CapabilityStatus::Beta,
+        privacy: FEEDBACK_SCORE_TO_LANGFUSE,
+    },
+    Capability {
         id: "conversation.subagent_mascots",
         name: "Subagent Mascots",
         domain: "conversation",

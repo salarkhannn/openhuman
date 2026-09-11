@@ -56,6 +56,11 @@ fn usage_payload(usage: Option<&LastTurnUsage>) -> Option<TurnUsagePayload> {
 /// append — is not the difference between the answer existing and not existing
 /// (#6034). Pass `None` from a caller that has no workspace in scope; delivery
 /// then behaves exactly as it did when the renderer was the only writer.
+///
+/// `trace_id` is the Langfuse trace this turn exported, stamped onto that same
+/// stored row so the renderer can attach a feedback score to it (#4496). `None`
+/// when the turn was not traced — the UI then offers no rating, which is the
+/// honest outcome: there would be no trace for a score to land on.
 pub(crate) async fn deliver_response(
     client_id: &str,
     thread_id: &str,
@@ -65,6 +70,7 @@ pub(crate) async fn deliver_response(
     citations: &[crate::openhuman::memory::agent::memory_loader::MemoryCitation],
     usage: Option<&LastTurnUsage>,
     workspace_dir: Option<&std::path::Path>,
+    trace_id: Option<&str>,
 ) {
     let usage_payload = usage_payload(usage);
 
@@ -96,16 +102,22 @@ pub(crate) async fn deliver_response(
             // work that has no business holding a runtime worker while a turn
             // is settling. Hand it to the blocking pool and await the handle,
             // which keeps the ordering this whole change rests on.
-            let (dir, thread, request, reply, cites) = (
+            let (dir, thread, request, reply, cites, trace) = (
                 dir.to_path_buf(),
                 thread_id.to_string(),
                 request_id.to_string(),
                 full_response.to_string(),
                 citations.to_vec(),
+                trace_id.map(str::to_string),
             );
             let persisted = tokio::task::spawn_blocking(move || {
                 super::reply_persistence::persist_delivered_reply(
-                    &dir, &thread, &request, &reply, &cites,
+                    &dir,
+                    &thread,
+                    &request,
+                    &reply,
+                    &cites,
+                    trace.as_deref(),
                 )
             })
             .await;

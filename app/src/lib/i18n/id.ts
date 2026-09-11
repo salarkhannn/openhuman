@@ -715,6 +715,8 @@ const messages: TranslationMap = {
   'chat.typeMessage': 'Kirim pesan...',
   'chat.send': 'Kirim pesan',
   'chat.stopGeneration': 'Hentikan pembuatan',
+  'chat.feedback.goodResponse': 'Respons bagus',
+  'chat.feedback.badResponse': 'Respons buruk',
   'chat.stoppedByUser': 'Dihentikan',
   'chat.parallelBranchHint': 'Ketik cabang paralel: ⌘/Ctrl+Enter untuk mengirim',
   'chat.followupHint':

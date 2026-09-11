@@ -71,3 +71,59 @@ fn turn_content_respects_the_trace_context_capture_gate() {
         );
     }
 }
+
+// ── turn trace identity (#4496) ─────────────────────────────────────────────
+
+#[test]
+fn turn_trace_id_prefers_the_ui_session_then_falls_back_to_the_thread() {
+    // The exporter writes this string as the `trace-create` body's `id`, and a
+    // feedback score has to name the same one. Both branches are live: a PTT
+    // turn carries a UI session id, ordinary chat does not.
+    assert_eq!(
+        turn_trace_id(Some(42), "thread-abc", "req-1"),
+        "42:req-1",
+        "a caller-supplied session id wins"
+    );
+    assert_eq!(
+        turn_trace_id(None, "thread-abc", "req-1"),
+        "thread-abc:req-1",
+        "ordinary chat falls back to the thread id"
+    );
+}
+
+#[test]
+fn turn_trace_id_is_built_from_trace_session_id() {
+    // Pins the two against each other so the delivery path and the exporter
+    // cannot drift into scoring a trace that was never created.
+    for session in [None, Some(7u64)] {
+        assert_eq!(
+            turn_trace_id(session, "thread-x", "req-9"),
+            format!("{}:req-9", trace_session_id(session, "thread-x")),
+        );
+    }
+}
+
+#[test]
+fn turn_tracing_is_enabled_by_either_sink() {
+    let mut config = crate::openhuman::config::Config::default();
+
+    config.observability.share_usage_data = false;
+    config.observability.agent_tracing.enabled = false;
+    assert!(
+        !turn_tracing_enabled(&config),
+        "with neither sink on, no trace is created and none may be stamped"
+    );
+
+    config.observability.share_usage_data = true;
+    assert!(
+        turn_tracing_enabled(&config),
+        "usage sharing alone is enough"
+    );
+
+    config.observability.share_usage_data = false;
+    config.observability.agent_tracing.enabled = true;
+    assert!(
+        turn_tracing_enabled(&config),
+        "an explicit agent_tracing opt-in is enough on its own"
+    );
+}

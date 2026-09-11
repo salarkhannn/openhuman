@@ -149,3 +149,133 @@ pub(crate) async fn push_spans(config: &Config, spans: &[TraceSpan]) -> Result<(
     }
     Ok(())
 }
+
+/// Build a single-event `score-create` ingestion batch.
+///
+/// Split out from [`push_score`] so the wire shape is testable without a
+/// network: Langfuse identifies the target trace by `body.traceId`, and a score
+/// naming a trace that was never created is accepted and then silently orphaned
+/// — which makes the shape, not the HTTP status, the thing worth asserting.
+///
+/// `value` is a raw `f64` because Langfuse's `NUMERIC` score type is what both
+/// the thumbs (1.0 / 0.0) and any later automated quality verdict fit into;
+/// `comment` is omitted entirely when absent rather than sent as `null`.
+pub(crate) fn build_score_batch(
+    trace_id: &str,
+    name: &str,
+    value: f64,
+    comment: Option<&str>,
+) -> Value {
+    let mut body = json!({
+        "id": new_event_id(),
+        "traceId": trace_id,
+        "name": name,
+        "value": value,
+    });
+    if let Some(comment) = comment {
+        body["comment"] = json!(comment);
+    }
+    json!({
+        "batch": [{
+            "id": new_event_id(),
+            "type": "score-create",
+            "timestamp": iso_millis(chrono::Utc::now().timestamp_millis() as u64),
+            "body": body,
+        }]
+    })
+}
+
+/// Attach one score to an existing trace (issue #4496).
+///
+/// Resolution, auth, environment skip and partial-rejection handling all mirror
+/// [`push_spans`] — the batch travels the same backend proxy route under the
+/// same session bearer, so clients still never hold Langfuse keys.
+///
+/// **Unlike `push_spans`, the `share_usage_data` gate lives here rather than in
+/// the caller.** Span export is driven by one internal pipeline that checks the
+/// flag before collecting anything; a score arrives from an RPC the renderer
+/// can call at any time, so the only place the privacy promise can be made
+/// un-bypassable is inside this function. It returns `Ok(())` — not an error —
+/// when the user has opted out: declining to send telemetry is a success.
+pub(crate) async fn push_score(
+    config: &Config,
+    trace_id: &str,
+    name: &str,
+    value: f64,
+    comment: Option<&str>,
+) -> Result<(), String> {
+    if !config.observability.share_usage_data {
+        tracing::debug!(
+            target: LOG_TARGET,
+            "[agent-tracing] score {name} withheld: share_usage_data is off"
+        );
+        return Ok(());
+    }
+
+    let url = ingestion_url(config);
+    // Same ordering as `push_spans`: a skipped environment must cost nothing
+    // before the URL check, the session lookup, or the request.
+    let environment = environment_for_base(&url);
+    if skip_push(environment) {
+        return Ok(());
+    }
+    if !url.starts_with("http") {
+        return Err(format!(
+            "could not resolve Langfuse ingestion URL from backend host (got {url:?})"
+        ));
+    }
+    let token = require_live_session_token(config)?;
+    let batch = build_score_batch(trace_id, name, value, comment);
+
+    tracing::debug!(
+        target: LOG_TARGET,
+        "[agent-tracing] pushing score {name}={value} for trace {trace_id} to Langfuse at {url}"
+    );
+
+    // Backend traffic on the proxy route, so it carries the product identity
+    // header for the same reason `push_spans` does.
+    let (product_header, product_value) = crate::api::product::product_identity_header();
+    let response = reqwest::Client::new()
+        .post(&url)
+        .header(
+            reqwest::header::AUTHORIZATION,
+            bearer_authorization_value(&token),
+        )
+        .header(product_header, product_value)
+        .timeout(PUSH_TIMEOUT)
+        .json(&batch)
+        .send()
+        .await
+        .map_err(|err| format!("POST {url} failed: {err}"))?;
+
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        let excerpt: String = body.chars().take(200).collect();
+        return Err(format!("Langfuse ingestion returned {status}: {excerpt}"));
+    }
+    // A 207 with a populated `errors` array is how Langfuse rejects an
+    // individual event — most often a `traceId` it has never seen. Treat that
+    // as a failure rather than a warning: the caller's whole job is to tell the
+    // user whether their feedback landed, and a silently orphaned score is the
+    // exact failure this feature exists to avoid.
+    let rejected = serde_json::from_str::<Value>(&body)
+        .ok()
+        .and_then(|v| v.get("errors").and_then(Value::as_array).cloned())
+        .filter(|errs| !errs.is_empty());
+    if let Some(errs) = rejected {
+        let excerpt: String = serde_json::to_string(&errs)
+            .unwrap_or_default()
+            .chars()
+            .take(400)
+            .collect();
+        return Err(format!(
+            "Langfuse ({status}) rejected the score event for trace {trace_id}: {excerpt}"
+        ));
+    }
+    tracing::debug!(
+        target: LOG_TARGET,
+        "[agent-tracing] pushed score {name} for trace {trace_id} to Langfuse ({status})"
+    );
+    Ok(())
+}

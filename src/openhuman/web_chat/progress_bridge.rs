@@ -377,68 +377,68 @@ pub(crate) fn spawn_progress_bridge(
         // id (falling back to the thread id for headless/autonomous runs).
         // `None` (disabled) is zero-cost.
         let mut journal_trace_ctx = None;
-        let mut span_collector = if config.observability.share_usage_data
-            || config.observability.agent_tracing.enabled
-        {
-            use crate::openhuman::agent::progress_tracing::{
-                trace_session_id, RunType, SpanCollector, TraceContext,
-            };
-            // One trace per turn: the trace id is unique per request, while the
-            // thread id rides along as the Langfuse `sessionId` so a
-            // conversation's per-turn traces still group under one session.
-            let base = trace_session_id(metadata.session_id, &thread_id);
-            let trace_id = format!("{base}:{request_id}");
-            // Attribute the trace to the *real* authenticated user (cached
-            // `auth_get_me` identity: id, else email) — the transport client
-            // id (socket client / "system") is NOT a user; it rides along as
-            // the separate `client.id` metadata attribute. When no identity is
-            // cached (signed-out / fresh install), fall back to the client id
-            // so the trace still carries some attribution.
-            let identity =
-                crate::openhuman::desktop::app_state::peek_cached_current_user_identity();
-            let user_attributed = identity.is_some();
-            let user_id = identity
-                .and_then(|i| i.id.or(i.email))
-                .or_else(|| session_profile_user_attribution(&config))
-                .unwrap_or_else(|| client_id.clone());
-            // Run origin for trace metadata: the request's source tag
-            // ("ptt"/"dictation"/"type"/"autonomous"/…), else a
-            // plain interactive chat turn.
-            let run_type = RunType::from_source(metadata.source.as_deref());
-            let channel_source = metadata
-                .source
-                .clone()
-                .unwrap_or_else(|| "chat".to_string());
-            // Storage-level privacy gate (#4454): capture_content (off by
-            // default) rides on the TraceContext so the collector only attaches
-            // prompt/reply content to spans when the operator opted in — no
-            // exporter can serialize prompt/reply text otherwise.
-            let capture_content = config.observability.agent_tracing.capture_content;
-            log::debug!(
-                "[web_channel][bridge] trace context trace_id={} user_attributed={} \
+        let mut span_collector =
+            if crate::openhuman::agent::progress_tracing::turn_tracing_enabled(&config) {
+                use crate::openhuman::agent::progress_tracing::{
+                    turn_trace_id, RunType, SpanCollector, TraceContext,
+                };
+                // One trace per turn: unique per request, while the thread id
+                // rides along as the Langfuse `sessionId` so a conversation's
+                // per-turn traces group under one session. `turn_trace_id` is
+                // shared with the runner that stamps it onto the persisted
+                // reply, so a score cannot name a trace this never created.
+                let trace_id = turn_trace_id(metadata.session_id, &thread_id, &request_id);
+                // Attribute the trace to the *real* authenticated user (cached
+                // `auth_get_me` identity: id, else email) — the transport client
+                // id (socket client / "system") is NOT a user; it rides along as
+                // the separate `client.id` metadata attribute. When no identity is
+                // cached (signed-out / fresh install), fall back to the client id
+                // so the trace still carries some attribution.
+                let identity =
+                    crate::openhuman::desktop::app_state::peek_cached_current_user_identity();
+                let user_attributed = identity.is_some();
+                let user_id = identity
+                    .and_then(|i| i.id.or(i.email))
+                    .or_else(|| session_profile_user_attribution(&config))
+                    .unwrap_or_else(|| client_id.clone());
+                // Run origin for trace metadata: the request's source tag
+                // ("ptt"/"dictation"/"type"/"autonomous"/…), else a
+                // plain interactive chat turn.
+                let run_type = RunType::from_source(metadata.source.as_deref());
+                let channel_source = metadata
+                    .source
+                    .clone()
+                    .unwrap_or_else(|| "chat".to_string());
+                // Storage-level privacy gate (#4454): capture_content (off by
+                // default) rides on the TraceContext so the collector only attaches
+                // prompt/reply content to spans when the operator opted in — no
+                // exporter can serialize prompt/reply text otherwise.
+                let capture_content = config.observability.agent_tracing.capture_content;
+                log::debug!(
+                    "[web_channel][bridge] trace context trace_id={} user_attributed={} \
                  agent_id={:?} channel_source={} run_type={} capture_content={} request_id={}",
-                trace_id,
-                user_attributed,
-                metadata.agent_id,
-                channel_source,
-                run_type.as_str(),
-                capture_content,
-                request_id,
-            );
-            let mut trace_ctx = TraceContext::new(trace_id, Some(user_id))
-                .with_session_group(thread_id.clone())
-                .with_client_id(client_id.clone())
-                .with_channel_source(channel_source)
-                .with_run_type(run_type)
-                .with_capture_content(capture_content);
-            if let Some(agent_id) = metadata.agent_id.clone() {
-                trace_ctx = trace_ctx.with_agent_id(agent_id);
-            }
-            journal_trace_ctx = Some(trace_ctx.clone());
-            Some(SpanCollector::new(trace_ctx))
-        } else {
-            None
-        };
+                    trace_id,
+                    user_attributed,
+                    metadata.agent_id,
+                    channel_source,
+                    run_type.as_str(),
+                    capture_content,
+                    request_id,
+                );
+                let mut trace_ctx = TraceContext::new(trace_id, Some(user_id))
+                    .with_session_group(thread_id.clone())
+                    .with_client_id(client_id.clone())
+                    .with_channel_source(channel_source)
+                    .with_run_type(run_type)
+                    .with_capture_content(capture_content);
+                if let Some(agent_id) = metadata.agent_id.clone() {
+                    trace_ctx = trace_ctx.with_agent_id(agent_id);
+                }
+                journal_trace_ctx = Some(trace_ctx.clone());
+                Some(SpanCollector::new(trace_ctx))
+            } else {
+                None
+            };
 
         // #4270: emit a periodic liveness beat for the whole in-flight turn so
         // the frontend silence timer never false-fires during a long prefill or

@@ -706,6 +706,8 @@ const messages: TranslationMap = {
   'chat.typeMessage': 'कोई संदेश भेजें...',
   'chat.send': 'मैसेज भेजें',
   'chat.stopGeneration': 'जेनरेशन रोकें',
+  'chat.feedback.goodResponse': 'अच्छा उत्तर',
+  'chat.feedback.badResponse': 'खराब उत्तर',
   'chat.stoppedByUser': 'रोक दिया गया',
   'chat.parallelBranchHint': 'समानांतर शाखा टाइप करें: भेजने के लिए ⌘/Ctrl+Enter',
   'chat.followupHint':

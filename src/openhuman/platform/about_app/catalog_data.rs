@@ -140,6 +140,22 @@ const EMBEDDING_PROBE_TO_CONFIGURED_PROVIDER: Option<CapabilityPrivacy> = Some(C
     ],
 });
 
+// A feedback score is a number (1.0 / 0.0) plus the turn's trace id, posted to
+// the backend's Langfuse proxy route, which forwards it to the co-hosted
+// Langfuse project. No message text rides along: the thumbs submit no comment,
+// and the trace the score attaches to only carries prompt/reply content when
+// `observability.agent_tracing.capture_content` is separately opted into.
+// Named rather than reusing `DERIVED_TO_BACKEND` because Langfuse is a real
+// destination beyond the backend and the README asks for that diligence.
+const FEEDBACK_SCORE_TO_LANGFUSE: Option<CapabilityPrivacy> = Some(CapabilityPrivacy {
+    leaves_device: true,
+    data_kind: PrivacyDataKind::Derived,
+    destinations: &[
+        "OpenHuman backend",
+        "Langfuse (via the backend telemetry proxy)",
+    ],
+});
+
 use std::sync::LazyLock;
 
 #[path = "catalog_part_01.rs"]

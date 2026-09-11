@@ -64,6 +64,8 @@ use crate::openhuman::config::Config;
 pub(crate) mod journal_projection;
 /// Langfuse ingestion exporter (remote push to the co-hosted staging server).
 pub(crate) mod langfuse;
+/// Renderer-facing RPC for submitting feedback scores onto a turn's trace.
+pub mod rpc;
 
 #[cfg(test)]
 mod journal_projection_tests;
@@ -235,6 +237,34 @@ pub fn trace_session_id(ui_session_id: Option<u64>, thread_id: &str) -> String {
     ui_session_id
         .map(|id| id.to_string())
         .unwrap_or_else(|| thread_id.to_string())
+}
+
+/// Whether a turn run under `config` exports a trace at all.
+///
+/// Both tracing sinks hang off this: usage sharing feeds the backend's Langfuse
+/// project, and the explicit `agent_tracing` toggle covers a user who exports
+/// spans without opting into usage sharing. With neither on, the progress
+/// bridge installs no span collector, so no `trace-create` is ever written —
+/// and a trace id stamped onto a reply would name a trace that does not exist.
+/// The runner checks this before stamping for exactly that reason (#4496).
+pub fn turn_tracing_enabled(config: &Config) -> bool {
+    config.observability.share_usage_data || config.observability.agent_tracing.enabled
+}
+
+/// The Langfuse trace id for one turn: `<trace session id>:<request id>`.
+///
+/// This is the id the exporter writes as the `trace-create` body's `id`, so it
+/// is also the id a [`langfuse::push_score`] event must name to attach to that
+/// turn. Two call sites need it and they must not drift: the progress bridge
+/// (which creates the trace) and the web-chat runner (which stamps it onto the
+/// persisted reply so the renderer can submit feedback against it). Deriving
+/// both from this one function is what keeps a score pointing at a trace that
+/// actually exists (#4496).
+pub fn turn_trace_id(ui_session_id: Option<u64>, thread_id: &str, request_id: &str) -> String {
+    format!(
+        "{}:{request_id}",
+        trace_session_id(ui_session_id, thread_id)
+    )
 }
 
 /// What a span represents. Mirrors the [`AgentProgress`] lifecycle.

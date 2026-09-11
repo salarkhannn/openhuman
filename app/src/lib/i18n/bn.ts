@@ -705,6 +705,8 @@ const messages: TranslationMap = {
   'chat.typeMessage': 'একটি বার্তা পাঠান...',
   'chat.send': 'বার্তা পাঠান',
   'chat.stopGeneration': 'জেনারেশন বন্ধ করুন',
+  'chat.feedback.goodResponse': 'ভালো উত্তর',
+  'chat.feedback.badResponse': 'খারাপ উত্তর',
   'chat.stoppedByUser': 'থামানো হয়েছে',
   'chat.parallelBranchHint': 'সমান্তরাল শাখা টাইপ করুন: পাঠাতে ⌘/Ctrl+Enter',
   'chat.followupHint':

@@ -689,6 +689,8 @@ const messages: TranslationMap = {
   'chat.typeMessage': 'أرسل رسالة...',
   'chat.send': 'إرسال الرسالة',
   'chat.stopGeneration': 'إيقاف التوليد',
+  'chat.feedback.goodResponse': 'رد جيد',
+  'chat.feedback.badResponse': 'رد سيئ',
   'chat.stoppedByUser': 'تم الإيقاف',
   'chat.parallelBranchHint': 'فرع متوازٍ: ⌘/Ctrl+Enter للإرسال',
   'chat.followupHint': 'أضِف متابعة إلى القائمة: تُرسَل بعد هذا الرد · ⌘/Ctrl+Enter لفرع متوازٍ',

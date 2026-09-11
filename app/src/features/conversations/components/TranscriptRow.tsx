@@ -11,6 +11,7 @@ import { ShareMessageButton } from '../../share/ShareMessageButton';
 import { type AgentBubblePosition, formatRelativeTime } from '../utils/format';
 import { AgentMessageBubble, AgentMessageText } from './AgentMessageBubble';
 import { CitationChips, type MessageCitation } from './CitationChips';
+import { MessageFeedbackRail } from './MessageFeedback';
 import { PastTurnInsights } from './PastTurnInsights';
 import { UserTurnBody } from './UserTurnBody';
 
@@ -194,6 +195,12 @@ function TranscriptRowImpl({
                   </p>
                 )}
                 <MessageCitations raw={msg.extraMetadata?.citations} />
+                {/* Thumbs on the answer, submitting a Langfuse score against
+                    the turn's own trace (#4496). Not gated on
+                    `isLatestVisible`: the trace id is persisted on the row, so
+                    an older turn is still rateable after a reload, and the
+                    reply you want to rate is often no longer the newest one. */}
+                <MessageFeedbackRail traceId={msg.extraMetadata?.traceId} />
                 {isLatestVisible && (
                   <p className="px-1 text-[10px] text-content-faint">
                     {formatRelativeTime(msg.createdAt)}

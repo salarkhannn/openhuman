@@ -255,6 +255,20 @@ pub(crate) async fn run_chat_task(
     // wrappers below hold a pointer rather than inlining the whole future into
     // this already-large `run_chat_task` frame (which otherwise overflows the
     // default test-thread stack — see the channels web-turn coverage tests).
+    // The trace this turn exports, derived exactly as the progress bridge just
+    // derived it (shared `turn_trace_id`), and only when that bridge actually
+    // installs a span collector. Carried out on the result so delivery can
+    // stamp it onto the persisted reply — the renderer reads it back from there
+    // to submit a feedback score against the right trace (#4496).
+    let trace_id =
+        crate::openhuman::agent::progress_tracing::turn_tracing_enabled(&config).then(|| {
+            crate::openhuman::agent::progress_tracing::turn_trace_id(
+                metadata.session_id,
+                thread_id,
+                request_id,
+            )
+        });
+
     let turn = Box::pin(agent.run_single(message));
     let result = match crate::openhuman::agent::tinyagents::thread_context::with_thread_id(
         thread_id.to_string(),
@@ -277,6 +291,7 @@ pub(crate) async fn run_chat_task(
                 citations,
                 usage,
                 workspace_dir: config.workspace_dir.clone(),
+                trace_id,
             })
         }
         Err(err) => {
@@ -308,6 +323,9 @@ pub(crate) async fn run_chat_task(
                         citations: Vec::new(),
                         usage: None,
                         workspace_dir: config.workspace_dir.clone(),
+                        // Synthetic result: no turn ran, so there is no trace to
+                        // rate — same reasoning as `usage: None` above.
+                        trace_id: None,
                     })
                 }
                 BudgetCorrelation::UpgradeEmptyToBudget => {
@@ -327,6 +345,9 @@ pub(crate) async fn run_chat_task(
                         citations: Vec::new(),
                         usage: None,
                         workspace_dir: config.workspace_dir.clone(),
+                        // Synthetic result: no turn ran, so there is no trace to
+                        // rate — same reasoning as `usage: None` above.
+                        trace_id: None,
                     })
                 }
                 BudgetCorrelation::PassThrough => Err(err_message),

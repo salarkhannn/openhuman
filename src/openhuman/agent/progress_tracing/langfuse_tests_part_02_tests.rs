@@ -182,3 +182,98 @@ async fn empty_spans_push_is_ok_noop() {
     // Empty batch short-circuits before any host/token resolution or network.
     assert!(push_spans(&config, &[]).await.is_ok());
 }
+
+#[test]
+fn score_batch_carries_the_trace_id_name_and_value() {
+    let batch = build_score_batch("thread-7:req-42", "user-feedback", 1.0, None);
+    let events = batch["batch"].as_array().expect("batch array");
+    assert_eq!(events.len(), 1, "exactly one score event");
+
+    let event = &events[0];
+    assert_eq!(event["type"], "score-create");
+    assert!(event["id"].as_str().is_some(), "envelope id present");
+    assert!(
+        event["timestamp"].as_str().unwrap().contains('T'),
+        "ISO timestamp"
+    );
+
+    let body = &event["body"];
+    assert_eq!(
+        body["traceId"], "thread-7:req-42",
+        "the score must name the turn's trace or Langfuse orphans it"
+    );
+    assert_eq!(body["name"], "user-feedback");
+    assert_eq!(body["value"], 1.0);
+    assert!(body["id"].as_str().is_some(), "score id present");
+    assert_ne!(
+        body["id"], event["id"],
+        "the score's own id is distinct from the envelope's"
+    );
+    assert!(
+        body.get("comment").is_none(),
+        "comment is omitted entirely rather than sent as null"
+    );
+}
+
+#[test]
+fn score_batch_keeps_a_thumbs_down_at_zero() {
+    // A truthiness bug here would silently drop every negative rating, which is
+    // the half of the signal worth having.
+    let batch = build_score_batch("trace-1", "user-feedback", 0.0, None);
+    let body = &batch["batch"][0]["body"];
+    assert_eq!(body["value"], 0.0);
+    assert!(body["value"].is_number(), "value stays numeric, not a bool");
+}
+
+#[test]
+fn score_batch_includes_a_comment_when_given() {
+    let batch = build_score_batch("trace-1", "quality", 0.5, Some("partially answered"));
+    assert_eq!(batch["batch"][0]["body"]["comment"], "partially answered");
+}
+
+#[tokio::test]
+async fn push_score_is_a_noop_when_usage_sharing_is_off() {
+    // The privacy gate is the first thing `push_score` checks, so this returns
+    // before the environment check, the session lookup and the request. The
+    // config is otherwise identical to the one used by the failing test below,
+    // which is what proves the gate — and nothing else — is what shortened this
+    // path: flip `share_usage_data` and the same inputs produce an error.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut config = Config::default();
+    config.observability.share_usage_data = false;
+    config.api_url = Some("http://127.0.0.1:9".to_string());
+    config.config_path = dir.path().join("config.toml");
+
+    assert!(
+        push_score(&config, "trace-1", "user-feedback", 1.0, None)
+            .await
+            .is_ok(),
+        "opting out of telemetry is a success, not a failure"
+    );
+}
+
+#[tokio::test]
+async fn push_score_reports_a_refused_push_rather_than_swallowing_it() {
+    // Gate on, a local origin (which resolves to the `development` environment
+    // and IS push-allowed, so `skip_push` does not short-circuit), and a
+    // credential root with no stored session. The push is therefore attempted
+    // and refused at the session check, before any network call.
+    //
+    // `config_path` is what makes this hermetic: credential state resolves
+    // against its parent, so pointing it at a tempdir is what stops the test
+    // reading the developer's real profile and, with a live session, posting a
+    // real score.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut config = Config::default();
+    config.observability.share_usage_data = true;
+    config.api_url = Some("http://127.0.0.1:9".to_string());
+    config.config_path = dir.path().join("config.toml");
+
+    let err = push_score(&config, "trace-1", "user-feedback", 1.0, None)
+        .await
+        .expect_err("a push with no session must not report success");
+    assert!(
+        err.contains("no backend session token"),
+        "unexpected error: {err}"
+    );
+}

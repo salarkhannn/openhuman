@@ -699,6 +699,8 @@ const messages: TranslationMap = {
   'chat.typeMessage': '메시지를 보내세요...',
   'chat.send': '메시지 보내기',
   'chat.stopGeneration': '생성 중지',
+  'chat.feedback.goodResponse': '좋은 응답',
+  'chat.feedback.badResponse': '나쁜 응답',
   'chat.stoppedByUser': '중지됨',
   'chat.parallelBranchHint': '병렬 분기 입력: 보내려면 ⌘/Ctrl+Enter',
   'chat.followupHint': '후속 메시지를 대기열에 추가: 이 응답 후 전송 · 병렬 분기는 ⌘/Ctrl+Enter',

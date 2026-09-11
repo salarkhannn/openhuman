@@ -55,6 +55,7 @@ pub(crate) fn persist_delivered_reply(
     request_id: &str,
     full_response: &str,
     citations: &[MemoryCitation],
+    trace_id: Option<&str>,
 ) -> Result<bool, String> {
     let content = full_response.trim();
     if content.is_empty() {
@@ -68,6 +69,15 @@ pub(crate) fn persist_delivered_reply(
         // Same key and payload the client stamps, so a row read back from disk
         // renders identical chips to one the client had appended itself.
         extra_metadata["citations"] = json!(citations);
+    }
+    if let Some(trace_id) = trace_id {
+        // The Langfuse trace this turn exported. Stamped here rather than sent
+        // on `chat_done` because this row is what the reader ends up with: the
+        // client's append collapses onto it, so the renderer reads the trace id
+        // back out of the persisted message and submits the user's feedback
+        // score against it (#4496). Writing it on the event instead would lose
+        // it on every reload, and on any turn whose `chat_done` never arrived.
+        extra_metadata["traceId"] = json!(trace_id);
     }
     conversations::append_message(
         workspace_dir.to_path_buf(),

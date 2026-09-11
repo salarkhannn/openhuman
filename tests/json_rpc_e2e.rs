@@ -1162,6 +1162,47 @@ enabled = false
         toml::from_str(&cfg).expect("config toml must match Config schema");
 }
 
+/// `write_min_config` plus an explicit `[observability]` usage-sharing choice.
+///
+/// The privacy gate is a config value, not an environment variable — there is
+/// no `OPENHUMAN_SHARE_USAGE_DATA` override anywhere in the core, and
+/// `share_usage_data` defaults to **on**, so a test that does not write this
+/// block is testing the gate in its enabled state whatever it intended.
+fn write_min_config_with_usage_sharing(openhuman_dir: &Path, api_origin: &str, share: bool) {
+    let cfg = format!(
+        r#"api_url = "{api_origin}"
+default_model = "e2e-mock-model"
+default_temperature = 0.7
+chat_onboarding_completed = true
+
+[secrets]
+encrypt = false
+
+[observability]
+share_usage_data = {share}
+"#
+    );
+    fn write_config_file(config_dir: &Path, cfg: &str) {
+        std::fs::create_dir_all(config_dir).expect("mkdir openhuman");
+        std::fs::write(config_dir.join("config.toml"), cfg).expect("write config");
+    }
+
+    write_config_file(openhuman_dir, &cfg);
+    if openhuman_dir
+        .file_name()
+        .is_some_and(|name| name == std::ffi::OsStr::new(".openhuman"))
+    {
+        write_config_file(&openhuman_dir.join("users").join("local"), &cfg);
+    }
+
+    let parsed: openhuman_core::openhuman::config::Config =
+        toml::from_str(&cfg).expect("config toml must match Config schema");
+    assert_eq!(
+        parsed.observability.share_usage_data, share,
+        "the [observability] block must actually drive the gate under test"
+    );
+}
+
 fn ensure_test_rpc_auth() {
     JSON_RPC_AUTH_INIT.get_or_init(|| {
         // SAFETY: set_var is inside get_or_init so it runs exactly once across
@@ -1215,6 +1256,140 @@ async fn json_rpc_discovers_codex_and_claude_sessions_for_memory_ingestion() {
     assert_eq!(sources.len(), 2);
     assert!(sources.iter().all(|source| source["session_files"] == 1));
     assert!(sources.iter().all(|source| source["evidence_units"] == 1));
+
+    rpc_join.abort();
+}
+
+#[tokio::test]
+async fn json_rpc_observability_submit_score_is_withheld_when_usage_sharing_is_off() {
+    let _env_lock = json_rpc_e2e_env_lock();
+    let home = tempdir().expect("tempdir");
+    let openhuman_home = home.path().join(".openhuman");
+    let _home_guard = EnvVarGuard::set_to_path("HOME", home.path());
+    // A local origin resolves to the `development` environment, which IS a
+    // push-allowed environment — so nothing but the privacy gate can make this
+    // call succeed. That is what makes the assertion falsifiable: drop the gate
+    // from `push_score` and this test fails on the session-token error instead.
+    write_min_config_with_usage_sharing(&openhuman_home, "http://127.0.0.1:9", false);
+
+    let (rpc_addr, rpc_join) = serve_on_ephemeral(build_core_http_router(false)).await;
+    let rpc_base = format!("http://{rpc_addr}");
+
+    let response = post_json_rpc(
+        &rpc_base,
+        4_914_002,
+        "openhuman.observability_submit_score",
+        json!({
+            "trace_id": "e2e-thread:req-1",
+            "name": "user-feedback",
+            "value": 1.0,
+            "comment": "e2e",
+        }),
+    )
+    .await;
+
+    let result = assert_no_jsonrpc_error(&response, "observability_submit_score");
+    assert_eq!(
+        result["ok"], true,
+        "declining to send telemetry is a success, not a failure"
+    );
+    assert!(
+        result.get("error").is_none(),
+        "a withheld score reports no error: {result}"
+    );
+
+    rpc_join.abort();
+}
+
+#[tokio::test]
+async fn json_rpc_observability_submit_score_reports_a_failed_push() {
+    let _env_lock = json_rpc_e2e_env_lock();
+    let home = tempdir().expect("tempdir");
+    let openhuman_home = home.path().join(".openhuman");
+    let _home_guard = EnvVarGuard::set_to_path("HOME", home.path());
+    // Gate ON, no stored backend session: the push is attempted and refused
+    // before any network call. The RPC itself must still succeed — feedback is
+    // non-blocking — while reporting `ok: false`, which is the whole point: a
+    // hardcoded `ok: true` would confirm a rating that never left the machine.
+    write_min_config_with_usage_sharing(&openhuman_home, "http://127.0.0.1:9", true);
+
+    let (rpc_addr, rpc_join) = serve_on_ephemeral(build_core_http_router(false)).await;
+    let rpc_base = format!("http://{rpc_addr}");
+
+    let response = post_json_rpc(
+        &rpc_base,
+        4_914_003,
+        "openhuman.observability_submit_score",
+        json!({
+            "trace_id": "e2e-thread:req-2",
+            "name": "user-feedback",
+            "value": 0.0,
+        }),
+    )
+    .await;
+
+    let result = assert_no_jsonrpc_error(&response, "observability_submit_score");
+    assert_eq!(result["ok"], false, "a refused push must not report ok");
+    let error = result["error"]
+        .as_str()
+        .expect("a failure carries a reason");
+    assert!(
+        error.contains("no backend session token"),
+        "unexpected error: {error}"
+    );
+
+    rpc_join.abort();
+}
+
+#[tokio::test]
+async fn json_rpc_observability_submit_score_rejects_missing_params() {
+    let _env_lock = json_rpc_e2e_env_lock();
+    let home = tempdir().expect("tempdir");
+    let openhuman_home = home.path().join(".openhuman");
+    let _home_guard = EnvVarGuard::set_to_path("HOME", home.path());
+    write_min_config_with_usage_sharing(&openhuman_home, "http://127.0.0.1:9", false);
+
+    let (rpc_addr, rpc_join) = serve_on_ephemeral(build_core_http_router(false)).await;
+    let rpc_base = format!("http://{rpc_addr}");
+
+    // Required inputs are enforced from the declared schema, before the handler
+    // is entered at all — so a caller that forgets one is told which field is
+    // missing rather than getting a generic parse error.
+    let response = post_json_rpc(
+        &rpc_base,
+        4_914_004,
+        "openhuman.observability_submit_score",
+        json!({ "trace_id": "e2e-thread:req-3" }),
+    )
+    .await;
+
+    let error = response
+        .get("error")
+        .expect("a request missing `name` and `value` is a JSON-RPC error");
+    assert!(
+        error.to_string().contains("missing required param 'name'"),
+        "unexpected error: {error}"
+    );
+
+    // A present-but-wrong-typed field gets past the presence check and is
+    // rejected when the handler deserializes it, which is the branch the
+    // handler's own `invalid params` arm exists for.
+    let response = post_json_rpc(
+        &rpc_base,
+        4_914_005,
+        "openhuman.observability_submit_score",
+        json!({
+            "trace_id": "e2e-thread:req-3",
+            "name": "user-feedback",
+            "value": "not-a-number",
+        }),
+    )
+    .await;
+
+    assert!(
+        response.get("error").is_some(),
+        "a non-numeric score value must be rejected: {response}"
+    );
 
     rpc_join.abort();
 }

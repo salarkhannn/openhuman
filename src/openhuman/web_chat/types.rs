@@ -82,6 +82,14 @@ pub(super) struct WebChatTaskResult {
     /// re-resolved afterwards would be filed under whoever is signed in when
     /// the turn happens to finish.
     pub(super) workspace_dir: std::path::PathBuf,
+    /// Langfuse trace id for this turn, stamped onto the persisted reply so the
+    /// renderer can submit a feedback score against the right trace (#4496).
+    ///
+    /// Carried on the result for the same reason as `workspace_dir`: it is
+    /// derived from the values the turn actually ran with, and the delivery
+    /// path has no way to recompute it (the UI session id is not in scope
+    /// there). `None` when the turn produced no trace.
+    pub(super) trace_id: Option<String>,
 }
 
 /// Per-request metadata carried alongside a chat send. Currently used by the
